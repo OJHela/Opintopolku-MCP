@@ -1,0 +1,13 @@
+{
+  "name": "eperusteet-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for ePerusteet",
+  "main": "server-http.js",
+  "scripts": {
+    "start": "node server-http.js"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}
