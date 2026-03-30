@@ -33,6 +33,27 @@ function apiGet(base, path) {
 const P = (path) => apiGet(BASE_P, path);
 const Y = (path) => apiGet(BASE_Y, path);
 
+// ─── Smart truncation ─────────────────────────────────────────────────────────
+// Rajaa vastaukset ~20 000 merkkiin (n. 5000 tokenia) kontekstin säästämiseksi.
+// PDF-tekstit (hae_ops_dokumentti) rajataan tiukemmin ~8000 merkkiin.
+
+const MAX_CHARS_DEFAULT = 20000;
+const MAX_CHARS_DOCUMENT = 8000;
+
+function truncate(data, maxChars) {
+  const json = JSON.stringify(data, null, 2);
+  if (json.length <= maxChars) return data;
+  // Palauta katkaisttu merkkijono + huomio
+  const truncated = json.slice(0, maxChars);
+  // Yritä sulkea JSON siististi viimeisen rivinvaihdon kohdalla
+  const lastNewline = truncated.lastIndexOf("\n");
+  const clean = lastNewline > maxChars * 0.8 ? truncated.slice(0, lastNewline) : truncated;
+  return {
+    _huomio: `Vastaus rajattu (alkuperäinen ${json.length} merkkiä, näytetään ${maxChars}). Käytä sivutusta tai tarkempaa hakua saadaksesi lisää tietoa.`,
+    _data_alku: clean,
+  };
+}
+
 function qs(params) {
   const p = Object.entries(params)
     .filter(([, v]) => v !== undefined && v !== null && v !== "")
@@ -198,7 +219,10 @@ async function handleMcpMessage(msg) {
     const { name, arguments: toolArgs } = params;
     try {
       const data = await callTool(name, toolArgs || {});
-      return { response: { jsonrpc: "2.0", id, result: { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] } } };
+      // Dokumentit rajataan tiukemmin, muut löyhemmin
+      const maxChars = name === "hae_ops_dokumentti" ? MAX_CHARS_DOCUMENT : MAX_CHARS_DEFAULT;
+      const safe = truncate(data, maxChars);
+      return { response: { jsonrpc: "2.0", id, result: { content: [{ type: "text", text: JSON.stringify(safe, null, 2) }] } } };
     } catch (e) {
       return { response: { jsonrpc: "2.0", id, result: { content: [{ type: "text", text: `Virhe: ${e.message}` }], isError: true } } };
     }
