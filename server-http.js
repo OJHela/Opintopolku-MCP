@@ -316,19 +316,25 @@ const server = http.createServer(async (req, res) => {
           (req.headers["accept"] || "").includes("text/event-stream");
 
         if (clientAcceptsSse) {
-          // SSE streaming response (for clients that request it)
-          res.writeHead(200, {
+          // SSE streaming response — process all messages first, then send
+          const sseResults = [];
+          let sseSessionId = null;
+          for (const msg of messages) {
+            const { response, sessionId } = await handleMcpMessage(msg);
+            if (sessionId) sseSessionId = sessionId;
+            if (response) sseResults.push(response);
+          }
+
+          const sseHeaders = {
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache",
             Connection: "keep-alive",
-          });
+          };
+          if (sseSessionId) sseHeaders["Mcp-Session-Id"] = sseSessionId;
 
-          for (const msg of messages) {
-            const { response, sessionId } = await handleMcpMessage(msg);
-            if (sessionId) res.setHeader("Mcp-Session-Id", sessionId);
-            if (response) {
-              res.write(`data: ${JSON.stringify(response)}\n\n`);
-            }
+          res.writeHead(200, sseHeaders);
+          for (const r of sseResults) {
+            res.write(`data: ${JSON.stringify(r)}\n\n`);
           }
           res.end();
         } else {
