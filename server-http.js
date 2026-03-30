@@ -1,11 +1,8 @@
 #!/usr/bin/env node
 /**
- * ePerusteet MCP Server — HTTP transport
- * Deployable to Railway, Render, Fly.io etc.
- * Implements MCP Streamable HTTP transport (POST /mcp)
- *
- * Public API: https://eperusteet.opintopolku.fi/eperusteet-service/api/external
- * No auth required.
+ * ePerusteet MCP Server — Yhdistetty versio v2
+ * Valtakunnalliset perusteet + kuntakohtaiset OPS:t
+ * 17 työkalua, ei vaadi autentikointia.
  */
 
 const http = require("http");
@@ -13,37 +10,28 @@ const https = require("https");
 const { URL } = require("url");
 
 const PORT = process.env.PORT || 3000;
-const BASE = "https://eperusteet.opintopolku.fi/eperusteet-service/api/external";
+const BASE_P = "https://eperusteet.opintopolku.fi/eperusteet-service/api/external";
+const BASE_Y = "https://eperusteet.opintopolku.fi/eperusteet-ylops-service/api";
 
-// ─── ePerusteet API ──────────────────────────────────────────────────────────
-
-function apiGet(path) {
+function apiGet(base, path) {
   return new Promise((resolve, reject) => {
-    const url = new URL(BASE + path);
-    const opts = {
-      hostname: url.hostname,
-      path: url.pathname + url.search,
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        "User-Agent": "eperusteet-mcp/1.0",
-      },
-    };
-    const req = https.request(opts, (res) => {
-      let data = "";
-      res.on("data", (c) => (data += c));
-      res.on("end", () => {
-        try {
-          resolve(JSON.parse(data));
-        } catch {
-          resolve({ raw: data });
-        }
-      });
-    });
+    const url = new URL(base + path);
+    const req = https.request(
+      { hostname: url.hostname, path: url.pathname + url.search, method: "GET",
+        headers: { Accept: "application/json", "User-Agent": "eperusteet-mcp/2.0" } },
+      (res) => {
+        let data = "";
+        res.on("data", (c) => (data += c));
+        res.on("end", () => { try { resolve(JSON.parse(data)); } catch { resolve({ raw: data.slice(0, 3000) }); } });
+      }
+    );
     req.on("error", reject);
     req.end();
   });
 }
+
+const P = (path) => apiGet(BASE_P, path);
+const Y = (path) => apiGet(BASE_Y, path);
 
 function qs(params) {
   const p = Object.entries(params)
@@ -53,51 +41,25 @@ function qs(params) {
   return p ? "?" + p : "";
 }
 
-// ─── Tools ───────────────────────────────────────────────────────────────────
-
 const TOOLS = [
   {
     name: "hae_perusteet",
-    description:
-      "Hae ePerusteet-tietokannasta opetussuunnitelmia ja tutkintoja. Voit hakea nimellä, koulutustyypillä ja muilla kriteereillä.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        nimi: { type: "string", description: "Hae nimellä (esim. 'Lähihoitaja', 'Matematiikka')" },
-        koulutustyyppi: {
-          type: "string",
-          description:
-            "Koulutustyyppi: koulutustyyppi_2 (perusopetus), koulutustyyppi_5 (lukio), koulutustyyppi_11 (ammatillinen). Jätä tyhjäksi kaikille.",
-        },
-        sivu: { type: "number", description: "Sivunumero (alkaa 0)" },
-        sivukoko: { type: "number", description: "Tulosten määrä, max 100. Oletus: 10" },
-        voimassaolo: { type: "boolean", description: "Vain voimassaolevat" },
-        poistunut: { type: "boolean", description: "Sisällytä poistuneet" },
-        tuleva: { type: "boolean", description: "Sisällytä tulevat" },
-      },
-    },
+    description: "Hae valtakunnallisia perusteita ja tutkintoja nimellä tai koulutustyypillä. Koulutustyypit: koulutustyyppi_2 (perusopetus), koulutustyyppi_5 (lukio), koulutustyyppi_11 (ammatillinen).",
+    inputSchema: { type: "object", properties: {
+      nimi: { type: "string" }, koulutustyyppi: { type: "string" },
+      sivu: { type: "number" }, sivukoko: { type: "number" },
+      voimassaolo: { type: "boolean" }, poistunut: { type: "boolean" }, tuleva: { type: "boolean" }
+    }},
   },
   {
     name: "hae_peruste",
-    description: "Hae yksittäisen perusteen kaikki tiedot ID:n perusteella.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        id: { type: "number", description: "Perusteen numeerinen ID (esim. 1013059)" },
-      },
-      required: ["id"],
-    },
+    description: "Hae yksittäisen valtakunnallisen perusteen tiedot ID:llä.",
+    inputSchema: { type: "object", properties: { id: { type: "number" } }, required: ["id"] },
   },
   {
     name: "hae_peruste_sisallysluettelo",
-    description: "Hae perusteen täydellinen sisällysluettelo ja rakenne.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        id: { type: "number", description: "Perusteen ID" },
-      },
-      required: ["id"],
-    },
+    description: "Hae valtakunnallisen perusteen rakenne ja sisällysluettelo.",
+    inputSchema: { type: "object", properties: { id: { type: "number" } }, required: ["id"] },
   },
   {
     name: "hae_koulutusalat",
@@ -106,272 +68,189 @@ const TOOLS = [
   },
   {
     name: "hae_tutkinnonosat",
-    description: "Hae ammatillisen tutkinnon kaikki tutkinnon osat.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        perusteId: { type: "number", description: "Perusteen ID" },
-      },
-      required: ["perusteId"],
-    },
+    description: "Hae ammatillisen tutkinnon osat.",
+    inputSchema: { type: "object", properties: { perusteId: { type: "number" } }, required: ["perusteId"] },
   },
   {
     name: "hae_tutkinnonosa",
     description: "Hae yksittäinen tutkinnon osa.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        perusteId: { type: "number", description: "Perusteen ID" },
-        tutkinnonosanId: { type: "number", description: "Tutkinnon osan ID" },
-      },
-      required: ["perusteId", "tutkinnonosanId"],
-    },
+    inputSchema: { type: "object", properties: { perusteId: { type: "number" }, tutkinnonosanId: { type: "number" } }, required: ["perusteId", "tutkinnonosanId"] },
   },
   {
     name: "hae_oppiaineet",
-    description: "Hae perusopetuksen tai lukion perusteen oppiaineet.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        perusteId: { type: "number", description: "Perusteen ID" },
-      },
-      required: ["perusteId"],
-    },
+    description: "Hae perusopetuksen tai lukion valtakunnallisen perusteen oppiaineet.",
+    inputSchema: { type: "object", properties: { perusteId: { type: "number" } }, required: ["perusteId"] },
   },
   {
     name: "hae_oppiaine",
-    description: "Hae yksittäinen oppiaine.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        perusteId: { type: "number", description: "Perusteen ID" },
-        oppiaineId: { type: "number", description: "Oppiaineen ID" },
-      },
-      required: ["perusteId", "oppiaineId"],
-    },
+    description: "Hae yksittäinen oppiaine valtakunnallisesta perusteesta.",
+    inputSchema: { type: "object", properties: { perusteId: { type: "number" }, oppiaineId: { type: "number" } }, required: ["perusteId", "oppiaineId"] },
   },
   {
-    name: "hae_uusimmat",
-    description: "Hae viimeksi muutetut perusteet.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        sivukoko: { type: "number", description: "Tulosten määrä. Oletus: 10." },
-      },
-    },
+    name: "hae_uusimmat_perusteet",
+    description: "Hae viimeksi muutetut valtakunnalliset perusteet.",
+    inputSchema: { type: "object", properties: { sivukoko: { type: "number" } } },
+  },
+  {
+    name: "hae_opetussuunnitelmat",
+    description: "Hae kuntien julkaistuja paikallisia opetussuunnitelmia (OPS). Hae kunnan nimellä esim. 'Helsinki', 'Tampere', 'Espoo'. Palauttaa ID:t joita voi käyttää muissa OPS-työkaluissa.",
+    inputSchema: { type: "object", properties: {
+      nimi: { type: "string", description: "Kunnan nimi" },
+      koulutustyyppi: { type: "string", description: "'perusopetus', 'lukio', 'esiopetus'" },
+      sivu: { type: "number" }, sivukoko: { type: "number" }
+    }},
+  },
+  {
+    name: "hae_opetussuunnitelma",
+    description: "Hae kuntakohtaisen OPS:n perustiedot ID:llä.",
+    inputSchema: { type: "object", properties: { id: { type: "number" } }, required: ["id"] },
+  },
+  {
+    name: "hae_ops_dokumentti",
+    description: "Hae kunnan OPS-dokumentti tekstinä — sisältää tuntijaot ja kaiken paikallisesti päätetyn. Helsinki perusopetus dokumenttiId=34654760.",
+    inputSchema: { type: "object", properties: { dokumenttiId: { type: "number", description: "Dokumentin ID. Helsinki=34654760" } }, required: ["dokumenttiId"] },
+  },
+  {
+    name: "hae_ops_tuntijako",
+    description: "Hae kunnan OPS:n tuntijako — viikkotuntimäärät vuosiluokittain.",
+    inputSchema: { type: "object", properties: { id: { type: "number" } }, required: ["id"] },
+  },
+  {
+    name: "hae_ops_oppiaineet",
+    description: "Hae kunnan paikallisen OPS:n oppiaineet.",
+    inputSchema: { type: "object", properties: { id: { type: "number" } }, required: ["id"] },
+  },
+  {
+    name: "hae_ops_luvut",
+    description: "Hae kunnan OPS:n rakenne ja luvut.",
+    inputSchema: { type: "object", properties: { id: { type: "number" } }, required: ["id"] },
+  },
+  {
+    name: "hae_ops_tiedot",
+    description: "Hae kunnan OPS:n täydelliset tiedot.",
+    inputSchema: { type: "object", properties: { id: { type: "number" } }, required: ["id"] },
+  },
+  {
+    name: "vertaile_tuntijakoja",
+    description: "Vertaile kahden kunnan tuntijakoja rinnakkain dokumentti-ID:iden avulla.",
+    inputSchema: { type: "object", properties: {
+      dokumenttiId1: { type: "number" }, dokumenttiId2: { type: "number" },
+      kunta1: { type: "string" }, kunta2: { type: "string" }
+    }, required: ["dokumenttiId1", "dokumenttiId2"] },
   },
 ];
 
 async function callTool(name, args) {
   switch (name) {
     case "hae_perusteet":
-      return apiGet(
-        `/perusteet${qs({
-          nimi: args.nimi,
-          koulutustyyppi: args.koulutustyyppi,
-          sivu: args.sivu ?? 0,
-          sivukoko: args.sivukoko ?? 10,
-          voimassaolo: args.voimassaolo,
-          poistunut: args.poistunut,
-          tuleva: args.tuleva,
-        })}`
-      );
+      return P(`/perusteet${qs({ nimi: args.nimi, koulutustyyppi: args.koulutustyyppi, sivu: args.sivu ?? 0, sivukoko: args.sivukoko ?? 10, voimassaolo: args.voimassaolo, poistunut: args.poistunut, tuleva: args.tuleva })}`);
     case "hae_peruste":
-      return apiGet(`/peruste/${args.id}`);
+      return P(`/peruste/${args.id}`);
     case "hae_peruste_sisallysluettelo":
-      return apiGet(`/peruste/${args.id}/kaikki`);
+      return P(`/peruste/${args.id}/kaikki`);
     case "hae_koulutusalat":
-      return apiGet(`/perusteet/koulutusalat`);
+      return P(`/perusteet/koulutusalat`);
     case "hae_tutkinnonosat":
-      return apiGet(`/peruste/${args.perusteId}/tutkinnonosat`);
+      return P(`/peruste/${args.perusteId}/tutkinnonosat`);
     case "hae_tutkinnonosa":
-      return apiGet(`/peruste/${args.perusteId}/tutkinnonosa/${args.tutkinnonosanId}`);
+      return P(`/peruste/${args.perusteId}/tutkinnonosa/${args.tutkinnonosanId}`);
     case "hae_oppiaineet":
-      return apiGet(`/peruste/${args.perusteId}/oppiaineet`);
+      return P(`/peruste/${args.perusteId}/oppiaineet`);
     case "hae_oppiaine":
-      return apiGet(`/peruste/${args.perusteId}/oppiaine/${args.oppiaineId}`);
-    case "hae_uusimmat":
-      return apiGet(`/perusteet/uusimmat${qs({ sivukoko: args.sivukoko ?? 10 })}`);
+      return P(`/peruste/${args.perusteId}/oppiaine/${args.oppiaineId}`);
+    case "hae_uusimmat_perusteet":
+      return P(`/perusteet/uusimmat${qs({ sivukoko: args.sivukoko ?? 10 })}`);
+    case "hae_opetussuunnitelmat":
+      return Y(`/opetussuunnitelmat/julkiset${qs({ perusteenNimi: args.nimi, koulutustyyppi: args.koulutustyyppi, sivu: args.sivu ?? 0, sivukoko: args.sivukoko ?? 10, julkaistu: true })}`);
+    case "hae_opetussuunnitelma":
+      return Y(`/opetussuunnitelmat/${args.id}`);
+    case "hae_ops_dokumentti":
+      return Y(`/dokumentit/${args.dokumenttiId}`);
+    case "hae_ops_tuntijako":
+      return Y(`/opetussuunnitelmat/${args.id}/tuntijako`);
+    case "hae_ops_oppiaineet":
+      return Y(`/opetussuunnitelmat/${args.id}/oppiaineet`);
+    case "hae_ops_luvut":
+      return Y(`/opetussuunnitelmat/${args.id}/lops`);
+    case "hae_ops_tiedot":
+      return Y(`/opetussuunnitelmat/${args.id}/kaikki`);
+    case "vertaile_tuntijakoja": {
+      const [d1, d2] = await Promise.all([
+        Y(`/dokumentit/${args.dokumenttiId1}`),
+        Y(`/dokumentit/${args.dokumenttiId2}`),
+      ]);
+      return { kunta1: args.kunta1 || `Dokumentti ${args.dokumenttiId1}`, kunta2: args.kunta2 || `Dokumentti ${args.dokumenttiId2}`, dokumentti1: d1, dokumentti2: d2 };
+    }
     default:
       throw new Error(`Tuntematon työkalu: ${name}`);
   }
 }
 
-// ─── MCP request handler ──────────────────────────────────────────────────────
-
-// In-memory session store (stateless is fine for read-only tools, but we track
-// session IDs so clients that send Mcp-Session-Id get consistent responses)
-const sessions = new Set();
-
-function mcpResponse(id, result) {
-  return { jsonrpc: "2.0", id, result };
-}
-
-function mcpError(id, code, message) {
-  return { jsonrpc: "2.0", id, error: { code, message } };
-}
-
 async function handleMcpMessage(msg) {
   const { id, method, params } = msg;
-
   if (method === "initialize") {
-    const sessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    sessions.add(sessionId);
-    return {
-      response: mcpResponse(id, {
-        protocolVersion: "2024-11-05",
-        capabilities: { tools: {} },
-        serverInfo: { name: "eperusteet-mcp", version: "1.0.0" },
-      }),
-      sessionId,
-    };
+    return { response: { jsonrpc: "2.0", id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "eperusteet-mcp", version: "2.0.0" } } }, sessionId: `sess_${Date.now()}_${Math.random().toString(36).slice(2)}` };
   }
-
   if (method === "notifications/initialized") return { response: null };
-
-  if (method === "ping") {
-    return { response: mcpResponse(id, {}) };
-  }
-
-  if (method === "tools/list") {
-    return { response: mcpResponse(id, { tools: TOOLS }) };
-  }
-
+  if (method === "ping") return { response: { jsonrpc: "2.0", id, result: {} } };
+  if (method === "tools/list") return { response: { jsonrpc: "2.0", id, result: { tools: TOOLS } } };
   if (method === "tools/call") {
-    const { name, arguments: args } = params;
+    const { name, arguments: toolArgs } = params;
     try {
-      const data = await callTool(name, args || {});
-      return {
-        response: mcpResponse(id, {
-          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
-        }),
-      };
+      const data = await callTool(name, toolArgs || {});
+      return { response: { jsonrpc: "2.0", id, result: { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] } } };
     } catch (e) {
-      return {
-        response: mcpResponse(id, {
-          content: [{ type: "text", text: `Virhe: ${e.message}` }],
-          isError: true,
-        }),
-      };
+      return { response: { jsonrpc: "2.0", id, result: { content: [{ type: "text", text: `Virhe: ${e.message}` }], isError: true } } };
     }
   }
-
-  return { response: mcpError(id, -32601, `Method not found: ${method}`) };
+  return { response: { jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${method}` } } };
 }
 
-// ─── HTTP server ──────────────────────────────────────────────────────────────
-
 const server = http.createServer(async (req, res) => {
-  // CORS — needed so browser-based MCP clients can connect
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, DELETE");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Mcp-Session-Id, Accept");
-
-  if (req.method === "OPTIONS") {
-    res.writeHead(204);
-    res.end();
-    return;
-  }
-
-  // Health check
+  if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
   if (req.method === "GET" && req.url === "/") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
-        name: "eperusteet-mcp",
-        version: "1.0.0",
-        description: "MCP server for ePerusteet (Opetushallitus)",
-        mcp_endpoint: "/mcp",
-        tools: TOOLS.map((t) => t.name),
-      })
-    );
+    res.end(JSON.stringify({ name: "eperusteet-mcp", version: "2.0.0", mcp_endpoint: "/mcp", tools: TOOLS.map(t => t.name) }));
     return;
   }
-
-  if (req.method === "GET" && req.url === "/health") {
-    res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end("OK");
-    return;
-  }
-
-  // MCP endpoint — Streamable HTTP transport
+  if (req.method === "GET" && req.url === "/health") { res.writeHead(200); res.end("OK"); return; }
   if (req.url === "/mcp") {
     if (req.method === "POST") {
-      // Read body
       let body = "";
       req.on("data", (c) => (body += c));
       req.on("end", async () => {
         let messages;
-        try {
-          const parsed = JSON.parse(body);
-          // Support both single message and batch
-          messages = Array.isArray(parsed) ? parsed : [parsed];
-        } catch {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Invalid JSON" }));
-          return;
-        }
-
-        const clientAcceptsSse =
-          (req.headers["accept"] || "").includes("text/event-stream");
-
-        if (clientAcceptsSse) {
-          // SSE streaming response — process all messages first, then send
-          const sseResults = [];
-          let sseSessionId = null;
-          for (const msg of messages) {
-            const { response, sessionId } = await handleMcpMessage(msg);
-            if (sessionId) sseSessionId = sessionId;
-            if (response) sseResults.push(response);
-          }
-
-          const sseHeaders = {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            Connection: "keep-alive",
-          };
-          if (sseSessionId) sseHeaders["Mcp-Session-Id"] = sseSessionId;
-
-          res.writeHead(200, sseHeaders);
-          for (const r of sseResults) {
-            res.write(`data: ${JSON.stringify(r)}\n\n`);
-          }
+        try { const p = JSON.parse(body); messages = Array.isArray(p) ? p : [p]; }
+        catch { res.writeHead(400); res.end(JSON.stringify({ error: "Invalid JSON" })); return; }
+        const isSse = (req.headers["accept"] || "").includes("text/event-stream");
+        if (isSse) {
+          const results = []; let sid = null;
+          for (const msg of messages) { const { response, sessionId } = await handleMcpMessage(msg); if (sessionId) sid = sessionId; if (response) results.push(response); }
+          const h = { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" };
+          if (sid) h["Mcp-Session-Id"] = sid;
+          res.writeHead(200, h);
+          for (const r of results) res.write(`data: ${JSON.stringify(r)}\n\n`);
           res.end();
         } else {
-          // Standard JSON response
-          const results = [];
-          let newSessionId = null;
-
-          for (const msg of messages) {
-            const { response, sessionId } = await handleMcpMessage(msg);
-            if (sessionId) newSessionId = sessionId;
-            if (response) results.push(response);
-          }
-
-          if (newSessionId) res.setHeader("Mcp-Session-Id", newSessionId);
+          const results = []; let sid = null;
+          for (const msg of messages) { const { response, sessionId } = await handleMcpMessage(msg); if (sessionId) sid = sessionId; if (response) results.push(response); }
+          if (sid) res.setHeader("Mcp-Session-Id", sid);
           res.writeHead(200, { "Content-Type": "application/json" });
-          // Single message → single object; batch → array
           res.end(JSON.stringify(results.length === 1 ? results[0] : results));
         }
       });
       return;
     }
-
-    // DELETE = session termination (graceful, just acknowledge)
-    if (req.method === "DELETE") {
-      const sid = req.headers["mcp-session-id"];
-      if (sid) sessions.delete(sid);
-      res.writeHead(200);
-      res.end();
-      return;
-    }
+    if (req.method === "DELETE") { res.writeHead(200); res.end(); return; }
   }
-
-  res.writeHead(404, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ error: "Not found" }));
+  res.writeHead(404); res.end(JSON.stringify({ error: "Not found" }));
 });
 
 server.listen(PORT, () => {
-  console.log(`ePerusteet MCP server running on port ${PORT}`);
+  console.log(`ePerusteet MCP v2.0 running on port ${PORT}`);
   console.log(`MCP endpoint: http://localhost:${PORT}/mcp`);
+  console.log(`Tools: ${TOOLS.length}`);
 });
